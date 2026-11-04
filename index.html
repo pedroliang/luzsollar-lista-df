@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/style.css?v=3">
 </head>
 <body>
 <div class="app">
@@ -98,6 +98,17 @@
     </footer>
   </main>
 </div>
-<script src="assets/app.js"></script>
+<dialog id="preview" class="preview" aria-labelledby="pvTitle">
+  <header class="pv-head">
+    <h2 id="pvTitle">Pré-visualização</h2>
+    <p><span id="pvInfo"></span><br><span id="pvFile" class="pv-file"></span></p>
+  </header>
+  <div id="pvBody" class="pv-body"></div>
+  <footer class="pv-foot">
+    <button id="pvCancel" class="btn" type="button">Cancelar</button>
+    <button id="pvDownload" class="btn primary" type="button">Baixar</button>
+  </footer>
+</dialog>
+<script src="assets/app.js?v=3"></script>
 </body>
 </html>

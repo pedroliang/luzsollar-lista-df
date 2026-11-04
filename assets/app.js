@@ -453,12 +453,10 @@
     .replace(/[–—]/g, '-').replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
     .replace(/[^\x20-\xFF]/g, '?');
 
-  async function generatePdf() {
+  async function buildPdf(list, meta) {
     await loadScript('jspdf.umd.min.js');
     await loadScript('jspdf.plugin.autotable.min.js');
     const { jsPDF } = window.jspdf;
-    const list = visibleRows();
-    const meta = exportMeta(list);
     const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
     const W = doc.internal.pageSize.getWidth();
     const H = doc.internal.pageSize.getHeight();
@@ -583,13 +581,11 @@
       doc.text(`LuzSollar Lista DF | Emitido em ${meta.issued}`, M, H - 8);
       doc.text(`Página ${p} de ${pages}`, W - M, H - 8, { align: 'right' });
     }
-    doc.save(`${meta.fileBase}.pdf`);
+    return doc.output('blob');
   }
 
-  async function generateXlsx() {
+  async function buildXlsx(list, meta) {
     await loadScript('exceljs.min.js');
-    const list = visibleRows();
-    const meta = exportMeta(list);
     const wb = new window.ExcelJS.Workbook();
     wb.creator = 'LuzSollar Lista DF';
     wb.created = new Date();
@@ -694,14 +690,81 @@
     ws.pageSetup.printTitlesRow = '5:5';
 
     const buf = await wb.xlsx.writeBuffer();
-    const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  }
+
+  /* ---------- Pré-visualização ---------- */
+
+  const preview = { blob: null, name: '', url: null };
+
+  // Mesmo conteúdo do arquivo; usado no Excel e onde o navegador não abre PDF na página.
+  function previewSheet(list, meta) {
+    const red = (r, k) => (r.red && r.red[k] ? ' class="is-red"' : '');
+    const rows = list.map((r, i) => `<tr>
+      <td class="muted">${i + 1}</td>
+      <td${r.red && r.red.sku ? ' class="is-red"' : ' class="strong"'}>${esc(r.sku)}</td>
+      <td${red(r, 'desc')}>${esc(r.desc)}</td>
+      <td class="num${r.red && r.red.un ? ' is-red' : ''}">${fmt(r.un)}</td>
+      <td class="num${r.red && r.red.cx ? ' is-red' : ''}">${fmt(r.cx)}</td>
+      <td${red(r, 'date')}>${r.date ? r.date.label : ''}</td>
+      <td${red(r, 'obs')}>${esc(r.obs)}</td>
+      <td class="strong">${r.sent ? 'Enviado' : 'Pendente'}</td>
+    </tr>`).join('');
+    return `<div class="sheet">
+      <div class="sheet-title">LuzSollar Lista DF</div>
+      <div class="sheet-sub"><strong>Lista de pedido MKT-SP para Brasília (DF)</strong>
+        <span>Data prevista: ${esc(meta.dateLabel)}&emsp;Situação: ${esc(meta.statusLabel)}&emsp;Emitido em: ${esc(meta.issued)}</span></div>
+      <div class="sheet-scroll"><table>
+        <thead><tr><th>Item</th><th>SKU</th><th>Descrição</th><th class="num">Unidades</th><th class="num">Caixas</th><th>Data prevista</th><th>Observação</th><th>Situação</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td colspan="3">Total: ${plural(list.length, 'item', 'itens')}</td><td class="num">${fmt(sum(list, 'un'))}</td><td class="num">${fmt(sum(list, 'cx'))}</td><td colspan="3"></td></tr></tfoot>
+      </table></div>
+    </div>`;
+  }
+
+  async function openPreview(kind) {
+    const list = visibleRows();
+    const meta = exportMeta(list);
+    const isPdf = kind === 'pdf';
+    preview.blob = isPdf ? await buildPdf(list, meta) : await buildXlsx(list, meta);
+    preview.name = `${meta.fileBase}.${isPdf ? 'pdf' : 'xlsx'}`;
+
+    $('pvTitle').textContent = isPdf ? 'Pré-visualização do PDF' : 'Pré-visualização do Excel';
+    $('pvInfo').textContent = `${plural(list.length, 'item', 'itens')}, ${fmt(sum(list, 'un'))} unidades, ${fmt(sum(list, 'cx'))} caixas`;
+    $('pvFile').textContent = preview.name;
+    $('pvDownload').textContent = isPdf ? 'Baixar PDF' : 'Baixar Excel';
+
+    const body = $('pvBody');
+    if (isPdf && navigator.pdfViewerEnabled) {
+      preview.url = URL.createObjectURL(preview.blob);
+      body.innerHTML = '';
+      const frame = document.createElement('iframe');
+      frame.title = 'Pré-visualização do PDF';
+      frame.src = `${preview.url}#toolbar=0&navpanes=0&view=FitH`;
+      body.append(frame);
+    } else {
+      body.innerHTML = previewSheet(list, meta);
+    }
+    $('preview').showModal();
+  }
+
+  function clearPreview() {
+    $('pvBody').innerHTML = '';
+    if (preview.url) URL.revokeObjectURL(preview.url);
+    preview.url = null;
+    preview.blob = null;
+  }
+
+  function downloadPreview() {
+    const url = URL.createObjectURL(preview.blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${meta.fileBase}.xlsx`;
+    a.download = preview.name;
     document.body.append(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
+    $('preview').close();
   }
 
   async function runExport(btn, label, fn) {
@@ -724,8 +787,11 @@
 
   $('lnkSheet').href = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit?gid=${GID}#gid=${GID}`;
   $('btnRefresh').addEventListener('click', () => refresh(true));
-  $('btnPdf').addEventListener('click', e => runExport(e.currentTarget, 'Gerar PDF', generatePdf));
-  $('btnXlsx').addEventListener('click', e => runExport(e.currentTarget, 'Gerar Excel', generateXlsx));
+  $('btnPdf').addEventListener('click', e => runExport(e.currentTarget, 'Gerar PDF', () => openPreview('pdf')));
+  $('btnXlsx').addEventListener('click', e => runExport(e.currentTarget, 'Gerar Excel', () => openPreview('xlsx')));
+  $('pvCancel').addEventListener('click', () => $('preview').close());
+  $('pvDownload').addEventListener('click', downloadPreview);
+  $('preview').addEventListener('close', clearPreview);
   $('fDate').addEventListener('change', e => { state.date = e.target.value; render(); });
   $('fSearch').addEventListener('input', e => { state.q = e.target.value; render(); });
   document.querySelectorAll('.tabs button').forEach(b => {

@@ -210,6 +210,45 @@ tr.flash td { animation: flash 2.4s ease-out; }
 .sync i.on { background: var(--ok); }
 .sync i.off { background: var(--alert); }
 
+/* Pré-visualização antes de baixar */
+.preview {
+  width: min(1040px, calc(100vw - 32px));
+  height: calc(100dvh - 32px);
+  max-width: none; max-height: none;
+  padding: 0; border: 0; border-radius: 6px;
+  background: var(--surface); color: var(--ink);
+}
+.preview[open] { display: flex; flex-direction: column; }
+.preview::backdrop { background: rgba(10, 20, 31, .62); }
+.pv-head { padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.pv-head h2 { margin: 0; font: 700 20px/1.2 var(--tight); }
+.pv-head p { margin: 2px 0 0; font-size: 14px; color: var(--steel); }
+.pv-file { overflow-wrap: anywhere; }
+.pv-body { flex: 1; min-height: 0; overflow: auto; background: var(--canvas); }
+.pv-body iframe { display: block; width: 100%; height: 100%; border: 0; }
+.pv-foot {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 18px; border-top: 1px solid var(--line);
+}
+
+.sheet { margin: 16px; background: var(--surface); border: 1px solid var(--line); }
+.sheet-title {
+  padding: 10px 12px; background: var(--ink); color: #fff;
+  border-bottom: 3px solid var(--sol); font-size: 19px; font-weight: 700;
+}
+.sheet-sub { padding: 10px 12px; font-size: 14px; }
+.sheet-sub strong, .sheet-sub span { display: block; }
+.sheet-sub span { color: var(--steel); }
+.sheet-scroll { overflow-x: auto; }
+.sheet table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sheet th { padding: 7px 10px; background: var(--ink); color: #fff; text-align: left; white-space: nowrap; }
+.sheet td { padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.sheet .num { text-align: right; }
+.sheet .muted { color: var(--steel); }
+.sheet .strong { font-weight: 600; }
+.sheet .is-red { color: #D8201A; font-weight: 700; }
+.sheet tfoot td { background: #F1F4F7; font-weight: 700; border-top: 2px solid var(--ink); border-bottom: 0; }
+
 @media (max-width: 1040px) {
   .route { grid-template-columns: 1fr; gap: 14px; }
   .figures > div { flex: 1; min-width: 0; padding: 0 12px; }
@@ -247,6 +286,8 @@ tr.flash td { animation: flash 2.4s ease-out; }
   .grid tfoot td { display: inline; position: static; width: auto; padding: 0; border: 0; background: none; }
   .grid tfoot td:empty { display: none; }
   .statusbar { flex-direction: column; gap: 2px; }
+  .sheet { margin: 10px; }
+  .pv-foot .btn { flex: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
