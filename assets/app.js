@@ -23,7 +23,6 @@
     lastSig: null,
     busy: false,
     flash: new Set(),
-    colors: null,
     colorsOk: true,
     loaded: false,
   };
@@ -72,48 +71,86 @@
 
   const cellText = s => s.replace(/\s+/g, ' ').trim();
 
-  async function fetchColors(c) {
+  const toNumber = t => {
+    const v = t.replace(/\s/g, '');
+    if (!v) return null;
+    if (/^\d{1,3}([.,]\d{3})+$/.test(v)) return Number(v.replace(/[.,]/g, ''));
+    const n = Number(v.replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // Fonte principal: a versão HTML da aba, que é rápida e traz valores, cores e caixas de seleção.
+  async function fetchHtmlRows() {
     const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/htmlview/sheet?headers=true&gid=${GID}&_=${Date.now()}`;
-    const res = await fetch(url, { cache: 'no-store', credentials: 'omit' });
-    if (!res.ok) throw new Error(`cores: ${res.status}`);
-    const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+    let html;
+    try {
+      const res = await fetch(url, { cache: 'no-store', credentials: 'omit', signal: ctrl.signal });
+      if (!res.ok) throw new Error(`planilha: ${res.status}`);
+      html = await res.text();
+    } finally {
+      clearTimeout(timer);
+    }
+    const doc = new DOMParser().parseFromString(html, 'text/html');
     const css = [...doc.querySelectorAll('style')].map(s => s.textContent).join('');
     const redClasses = new Set();
     for (const [, cls, body] of css.matchAll(/\.(s\d+)\{([^}]*)\}/g)) {
       const m = body.match(/(?:^|;)\s*color:\s*([^;]+)/i);
       if (m && isRed(m[1])) redClasses.add(cls);
     }
-    const map = new Map();
-    let started = false;
+    const isRedCell = td => {
+      if (!td) return false;
+      if ([...td.classList].some(k => redClasses.has(k))) return true;
+      return [...td.querySelectorAll('[style*="color"]')].some(el => {
+        const m = (el.getAttribute('style') || '').match(/(?:^|;)\s*color:\s*([^;]+)/i);
+        return m && isRed(m[1]);
+      });
+    };
+    const isChecked = td => {
+      if (!td) return false;
+      const use = td.querySelector('use');
+      if (use) return !/unchecked/i.test(use.getAttribute('href') || use.getAttribute('xlink:href') || '');
+      return /^(TRUE|VERDADEIRO)$/i.test(cellText(td.textContent));
+    };
+
+    let c = null;
+    const rows = [];
     doc.querySelectorAll('tbody tr').forEach(tr => {
       const tds = [...tr.querySelectorAll('td')].filter(td => !td.classList.contains('freezebar-cell'));
-      if (!started) { started = /^SKU$/i.test(cellText(tds[c.sku]?.textContent || '')); return; }
-      if (!tds.length) return;
-      const red = td => {
-        if (!td) return false;
-        if ([...td.classList].some(k => redClasses.has(k))) return true;
-        return [...td.querySelectorAll('[style*="color"]')].some(el => {
-          const m = (el.getAttribute('style') || '').match(/(?:^|;)\s*color:\s*([^;]+)/i);
-          return m && isRed(m[1]);
-        });
+      const text = i => cellText(tds[i]?.textContent || '');
+      if (!c) {
+        if (tds.some(td => /^SKU$/i.test(cellText(td.textContent)))) {
+          c = mapColumns(tds.map(td => ({ label: cellText(td.textContent) })));
+        }
+        return;
+      }
+      const row = {
+        idx: rows.length,
+        sku: text(c.sku),
+        desc: text(c.desc),
+        un: toNumber(text(c.un)),
+        cx: toNumber(text(c.cx)),
+        date: parseDate({ v: text(c.date), f: text(c.date) }),
+        obs: text(c.obs),
+        sent: isChecked(tds[c.sent]),
+        red: {},
       };
-      const flags = {};
-      Object.entries(c).forEach(([name, i]) => { if (name !== 'sent') flags[name] = red(tds[i]); });
-      const key = `${cellText(tds[c.sku]?.textContent || '')}|${cellText(tds[c.desc]?.textContent || '')}`;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(flags);
+      ['sku', 'desc', 'un', 'cx', 'date', 'obs'].forEach(k => { row.red[k] = isRedCell(tds[c[k]]); });
+      if (row.sku || row.desc || row.un !== null || row.cx !== null || row.obs) rows.push(row);
     });
-    return map;
+    if (!c) throw new Error('cabeçalho não encontrado');
+    return rows;
   }
 
-  function applyColors(rows, map) {
-    const used = new Map();
-    rows.forEach(r => {
-      const key = `${cellText(r.sku)}|${cellText(r.desc)}`;
-      const n = used.get(key) || 0;
-      used.set(key, n + 1);
-      r.red = (map && map.get(key) && map.get(key)[n]) || {};
-    });
+  // Reserva: dados sem cores. Mantém as marcações da última leitura completa.
+  async function fetchFallbackRows() {
+    const data = await fetchSheet();
+    if (data.status !== 'ok') throw new Error('resposta inválida');
+    const rows = parseRows(data.table, mapColumns(data.table.cols));
+    const prev = new Map(state.rows.map(r => [`${cellText(r.sku)}|${cellText(r.desc)}`, r.red]));
+    rows.forEach(r => { r.red = prev.get(`${cellText(r.sku)}|${cellText(r.desc)}`) || {}; });
+    return rows;
   }
 
   // Acha cada coluna pelo nome; se o nome mudar, usa a posição original.
@@ -178,31 +215,22 @@
     state.busy = true;
     $('btnRefresh').setAttribute('aria-busy', 'true');
     try {
-      const data = await fetchSheet();
-      if (data.status !== 'ok') throw new Error('resposta inválida');
-      const c = mapColumns(data.table.cols);
-      const publish = rows => {
-        const sig = JSON.stringify(rows);
-        if (sig === state.lastSig) return;
+      let rows;
+      try {
+        rows = await fetchHtmlRows();
+        state.colorsOk = true;
+      } catch (err) {
+        console.warn(err);
+        rows = await fetchFallbackRows();
+        state.colorsOk = false;
+      }
+      state.loaded = true;
+      const sig = JSON.stringify(rows);
+      if (sig !== state.lastSig) {
         if (state.lastSig !== null) markChanges(rows);
         state.rows = rows;
         state.lastSig = sig;
         render();
-      };
-      // Mostra os dados primeiro; as cores chegam logo depois.
-      const rows = parseRows(data.table, c);
-      applyColors(rows, state.colors);
-      state.loaded = true;
-      publish(rows);
-      try {
-        state.colors = await fetchColors(c);
-        state.colorsOk = true;
-        const colored = rows.map(r => ({ ...r }));
-        applyColors(colored, state.colors);
-        publish(colored);
-      } catch (err) {
-        console.warn(err);
-        state.colorsOk = false; // mantém as últimas marcações lidas
       }
       setSync(true);
     } catch (err) {
