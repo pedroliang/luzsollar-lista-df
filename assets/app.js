@@ -25,6 +25,7 @@
     flash: new Set(),
     colors: null,
     colorsOk: true,
+    loaded: false,
   };
 
   /* ---------- Leitura da planilha ---------- */
@@ -180,21 +181,28 @@
       const data = await fetchSheet();
       if (data.status !== 'ok') throw new Error('resposta inválida');
       const c = mapColumns(data.table.cols);
-      const rows = parseRows(data.table, c);
-      try {
-        state.colors = await fetchColors(c);
-        state.colorsOk = true;
-      } catch (err) {
-        console.warn(err);
-        state.colorsOk = false; // mantém as últimas marcações lidas
-      }
-      applyColors(rows, state.colors);
-      const sig = JSON.stringify(rows);
-      if (sig !== state.lastSig) {
+      const publish = rows => {
+        const sig = JSON.stringify(rows);
+        if (sig === state.lastSig) return;
         if (state.lastSig !== null) markChanges(rows);
         state.rows = rows;
         state.lastSig = sig;
         render();
+      };
+      // Mostra os dados primeiro; as cores chegam logo depois.
+      const rows = parseRows(data.table, c);
+      applyColors(rows, state.colors);
+      state.loaded = true;
+      publish(rows);
+      try {
+        state.colors = await fetchColors(c);
+        state.colorsOk = true;
+        const colored = rows.map(r => ({ ...r }));
+        applyColors(colored, state.colors);
+        publish(colored);
+      } catch (err) {
+        console.warn(err);
+        state.colorsOk = false; // mantém as últimas marcações lidas
       }
       setSync(true);
     } catch (err) {
@@ -326,7 +334,9 @@
     box.hidden = list.length > 0;
     document.querySelector('.grid').hidden = !list.length;
     if (list.length) return;
-    if (!state.rows.length) {
+    if (!state.loaded) {
+      box.innerHTML = '<strong>Lendo a planilha…</strong>Os itens aparecem aqui em instantes.';
+    } else if (!state.rows.length) {
       box.innerHTML = '<strong>Nenhum item na lista</strong>Preencha a aba PEDIDO DF na planilha e os itens aparecem aqui.';
     } else if (state.q) {
       box.innerHTML = `<strong>Nada encontrado para “${esc(state.q)}”</strong>Busque por outro SKU ou limpe a busca.`;
@@ -360,7 +370,7 @@
     const noun = useBoxes ? 'caixas' : 'itens';
     $('routeCaption').textContent = total
       ? `${fmt(sent)} de ${fmt(total)} ${noun} enviadas`.replace('itens enviadas', 'itens enviados')
-      : 'Nenhum item na lista';
+      : state.loaded ? 'Nenhum item na lista' : 'Lendo a planilha…';
 
     const pending = scope.filter(r => !r.sent);
     $('figItems').textContent = fmt(scope.length);
