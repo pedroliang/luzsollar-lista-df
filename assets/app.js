@@ -426,7 +426,7 @@
     pageHeader();
     // Bloco de dados do pedido
     const info = [
-      ['Origem', 'MKT-SP'], ['Destino', 'Brasília (DF)'],
+      ['Origem', 'Brasília (DF)'], ['Destino', 'MKT-SP'],
       ['Data prevista', meta.dateLabel], ['Emitido em', meta.issued],
     ];
     const cellW = (W - 2 * M) / info.length;
@@ -512,7 +512,7 @@
     // Assinaturas
     let sy = doc.lastAutoTable.finalY + 24;
     if (sy > H - 26) { doc.addPage(); pageHeader(); sy = 52; }
-    const signs = ['Separado por', 'Conferido por', 'Recebido em DF por'];
+    const signs = ['Separado por', 'Conferido por', 'Recebido no MKT-SP por'];
     const gap = 8, sw = (W - 2 * M - gap * 2) / 3;
     signs.forEach((s, i) => {
       const x = M + i * (sw + gap);
