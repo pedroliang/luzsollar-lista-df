@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LuzSollar Lista DF</title>
+<meta name="description" content="Lista de pedido MKT-SP para Brasília, lida ao vivo da planilha.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2314273A'/%3E%3Ccircle cx='16' cy='16' r='6.5' fill='%23F5A300'/%3E%3Cpath d='M16 4v4M16 24v4M4 16h4M24 16h4M7.5 7.5l2.8 2.8M21.7 21.7l2.8 2.8M24.5 7.5l-2.8 2.8M10.3 21.7l-2.8 2.8' stroke='%23F5A300' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="bar">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="6.5" fill="#F5A300"/>
+        <path d="M16 3v4.5M16 24.5V29M3 16h4.5M24.5 16H29M6.8 6.8l3.2 3.2M22 22l3.2 3.2M25.2 6.8 22 10M10 22l-3.2 3.2" stroke="#F5A300" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <div>
+        <h1>LuzSollar Lista DF</h1>
+        <p>Lista de pedido MKT-SP para Brasília</p>
+      </div>
+    </div>
+    <div class="bar-actions">
+      <button id="btnRefresh" class="ghost" type="button">Atualizar</button>
+      <a class="ghost" id="lnkSheet" target="_blank" rel="noopener">Abrir planilha</a>
+    </div>
+  </header>
+
+  <div id="alert" class="alert" role="alert" hidden></div>
+
+  <section class="route" aria-label="Resumo do pedido">
+    <div class="route-line">
+      <div class="route-ends">
+        <div><strong>MKT-SP</strong><span>Origem</span></div>
+        <div class="end"><strong>Brasília</strong><span>Destino</span></div>
+      </div>
+      <div class="track" role="progressbar" aria-label="Caixas enviadas" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="track">
+        <i class="node start"></i><i class="fill" id="trackFill"></i><i class="node finish"></i>
+      </div>
+      <p class="route-caption" id="routeCaption">Lendo a planilha…</p>
+    </div>
+    <dl class="figures">
+      <div><dt>Previsão</dt><dd id="figDate">–</dd><small id="figDateNote"></small></div>
+      <div><dt>Itens</dt><dd id="figItems">–</dd><small id="figItemsNote"></small></div>
+      <div><dt>Unidades</dt><dd id="figUnits">–</dd><small>no pedido</small></div>
+      <div><dt>Caixas</dt><dd id="figBoxes">–</dd><small>no pedido</small></div>
+    </dl>
+  </section>
+
+  <main class="panel">
+    <div class="toolbar">
+      <div class="tabs" role="group" aria-label="Situação">
+        <button type="button" data-status="pendentes">Pendentes <b id="cntP">0</b></button>
+        <button type="button" data-status="enviados">Enviados <b id="cntE">0</b></button>
+        <button type="button" data-status="todos">Todos <b id="cntT">0</b></button>
+      </div>
+      <label class="field">
+        <span>Data prevista</span>
+        <select id="fDate"><option value="">Todas</option></select>
+      </label>
+      <label class="field grow">
+        <span>Buscar</span>
+        <input id="fSearch" type="search" placeholder="SKU, descrição ou observação" autocomplete="off">
+      </label>
+      <div class="exports">
+        <button id="btnXlsx" class="btn" type="button" disabled>Gerar Excel</button>
+        <button id="btnPdf" class="btn primary" type="button" disabled>Gerar PDF</button>
+      </div>
+    </div>
+
+    <div class="grid-wrap">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th data-key="sku" class="c-sku"><button type="button">SKU</button></th>
+            <th data-key="desc"><button type="button">Descrição</button></th>
+            <th data-key="un" class="num"><button type="button">Unidades</button></th>
+            <th data-key="cx" class="num"><button type="button">Caixas</button></th>
+            <th data-key="date"><button type="button">Data prevista</button></th>
+            <th data-key="obs"><button type="button">Observação</button></th>
+            <th data-key="sent"><button type="button">Situação</button></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+        <tfoot id="totals"></tfoot>
+      </table>
+      <div id="empty" class="empty" hidden></div>
+    </div>
+
+    <footer class="statusbar">
+      <span id="stCount">0 itens na tela</span>
+      <span class="sync"><i id="syncDot"></i><span id="stSync">Conectando à planilha…</span></span>
+    </footer>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>
