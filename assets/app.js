@@ -74,8 +74,12 @@
     const v = cell.value;
     if (v && typeof v === 'object' && !(v instanceof Date)) {
       if (Array.isArray(v.richText)) return v.richText.map(t => t.text).join('');
-      if ('result' in v) return v.result;
+      if ('formula' in v || 'sharedFormula' in v) {
+        const r = v.result;
+        return r && typeof r === 'object' && !(r instanceof Date) ? '' : r ?? '';
+      }
       if ('text' in v) return v.text;
+      return ''; // erro de fórmula ou célula sem valor
     }
     return v;
   }
