@@ -23,32 +23,11 @@
     lastSig: null,
     busy: false,
     flash: new Set(),
-    colorsOk: true,
     loaded: false,
   };
 
   /* ---------- Leitura da planilha ---------- */
 
-  function fetchSheet() {
-    return new Promise((resolve, reject) => {
-      const cb = `__listaDF${Date.now()}`;
-      const script = document.createElement('script');
-      const finish = (err, data) => {
-        clearTimeout(timer);
-        script.remove();
-        window[cb] = () => {};
-        err ? reject(err) : resolve(data);
-      };
-      const timer = setTimeout(() => finish(new Error('tempo esgotado')), TIMEOUT_MS);
-      window[cb] = data => finish(null, data);
-      script.onerror = () => finish(new Error('sem acesso'));
-      const tqx = encodeURIComponent(`out:json;responseHandler:${cb}`);
-      script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?gid=${GID}&tqx=${tqx}&_=${Date.now()}`;
-      document.head.append(script);
-    });
-  }
-
-  // A leitura de dados não traz a cor da letra; a versão HTML da aba traz.
   function isRed(color) {
     let m = String(color).trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
     let rgb;
@@ -69,89 +48,7 @@
     return sat > 0.4 && light >= 0.18 && light <= 0.75 && (hue <= 15 || hue >= 345);
   }
 
-  const cellText = s => s.replace(/\s+/g, ' ').trim();
-
-  const toNumber = t => {
-    const v = t.replace(/\s/g, '');
-    if (!v) return null;
-    if (/^\d{1,3}([.,]\d{3})+$/.test(v)) return Number(v.replace(/[.,]/g, ''));
-    const n = Number(v.replace(',', '.'));
-    return Number.isFinite(n) ? n : null;
-  };
-
-  // Fonte principal: a versão HTML da aba, que é rápida e traz valores, cores e caixas de seleção.
-  async function fetchHtmlRows() {
-    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/htmlview/sheet?headers=true&gid=${GID}&_=${Date.now()}`;
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-    let html;
-    try {
-      const res = await fetch(url, { cache: 'no-store', credentials: 'omit', signal: ctrl.signal });
-      if (!res.ok) throw new Error(`planilha: ${res.status}`);
-      html = await res.text();
-    } finally {
-      clearTimeout(timer);
-    }
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    const css = [...doc.querySelectorAll('style')].map(s => s.textContent).join('');
-    const redClasses = new Set();
-    for (const [, cls, body] of css.matchAll(/\.(s\d+)\{([^}]*)\}/g)) {
-      const m = body.match(/(?:^|;)\s*color:\s*([^;]+)/i);
-      if (m && isRed(m[1])) redClasses.add(cls);
-    }
-    const isRedCell = td => {
-      if (!td) return false;
-      if ([...td.classList].some(k => redClasses.has(k))) return true;
-      return [...td.querySelectorAll('[style*="color"]')].some(el => {
-        const m = (el.getAttribute('style') || '').match(/(?:^|;)\s*color:\s*([^;]+)/i);
-        return m && isRed(m[1]);
-      });
-    };
-    const isChecked = td => {
-      if (!td) return false;
-      const use = td.querySelector('use');
-      if (use) return !/unchecked/i.test(use.getAttribute('href') || use.getAttribute('xlink:href') || '');
-      return /^(TRUE|VERDADEIRO)$/i.test(cellText(td.textContent));
-    };
-
-    let c = null;
-    const rows = [];
-    doc.querySelectorAll('tbody tr').forEach(tr => {
-      const tds = [...tr.querySelectorAll('td')].filter(td => !td.classList.contains('freezebar-cell'));
-      const text = i => cellText(tds[i]?.textContent || '');
-      if (!c) {
-        if (tds.some(td => /^SKU$/i.test(cellText(td.textContent)))) {
-          c = mapColumns(tds.map(td => ({ label: cellText(td.textContent) })));
-        }
-        return;
-      }
-      const row = {
-        idx: rows.length,
-        sku: text(c.sku),
-        desc: text(c.desc),
-        un: toNumber(text(c.un)),
-        cx: toNumber(text(c.cx)),
-        date: parseDate({ v: text(c.date), f: text(c.date) }),
-        obs: text(c.obs),
-        sent: isChecked(tds[c.sent]),
-        red: {},
-      };
-      ['sku', 'desc', 'un', 'cx', 'date', 'obs'].forEach(k => { row.red[k] = isRedCell(tds[c[k]]); });
-      if (row.sku || row.desc || row.un !== null || row.cx !== null || row.obs) rows.push(row);
-    });
-    if (!c) throw new Error('cabeçalho não encontrado');
-    return rows;
-  }
-
-  // Reserva: dados sem cores. Mantém as marcações da última leitura completa.
-  async function fetchFallbackRows() {
-    const data = await fetchSheet();
-    if (data.status !== 'ok') throw new Error('resposta inválida');
-    const rows = parseRows(data.table, mapColumns(data.table.cols));
-    const prev = new Map(state.rows.map(r => [`${cellText(r.sku)}|${cellText(r.desc)}`, r.red]));
-    rows.forEach(r => { r.red = prev.get(`${cellText(r.sku)}|${cellText(r.desc)}`) || {}; });
-    return rows;
-  }
+  const cellText = v => String(v ?? '').replace(/\s+/g, ' ').trim();
 
   // Acha cada coluna pelo nome; se o nome mudar, usa a posição original.
   function mapColumns(cols) {
@@ -170,63 +67,101 @@
     };
   }
 
-  function parseDate(cell) {
-    if (!cell || cell.v === null || cell.v === undefined) return null;
-    const v = String(cell.v);
-    let y, m, d;
-    const g = v.match(/^Date\((\d+),(\d+),(\d+)/);
-    if (g) {
-      y = +g[1]; m = +g[2] + 1; d = +g[3];
-    } else {
-      const t = String(cell.f || v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-      if (!t) return null;
-      d = +t[1]; m = +t[2]; y = +t[3] < 100 ? 2000 + +t[3] : +t[3];
+  const pad = n => String(n).padStart(2, '0');
+  const makeDate = (y, m, d) => ({ y, m, d, iso: `${y}-${pad(m)}-${pad(d)}`, label: `${pad(d)}/${pad(m)}/${y}` });
+
+  function rawValue(cell) {
+    const v = cell.value;
+    if (v && typeof v === 'object' && !(v instanceof Date)) {
+      if (Array.isArray(v.richText)) return v.richText.map(t => t.text).join('');
+      if ('result' in v) return v.result;
+      if ('text' in v) return v.text;
     }
-    const pad = n => String(n).padStart(2, '0');
-    return { y, m, d, iso: `${y}-${pad(m)}-${pad(d)}`, label: `${pad(d)}/${pad(m)}/${y}` };
+    return v;
   }
 
-  function parseRows(table, c) {
-    const text = (row, i) => {
-      const cell = row.c[i];
-      if (!cell || cell.v === null || cell.v === undefined) return '';
-      return String(cell.f ?? cell.v).trim();
-    };
-    const number = (row, i) => {
-      const cell = row.c[i];
-      return cell && typeof cell.v === 'number' ? cell.v : null;
-    };
-    return (table.rows || [])
-      .map((row, idx) => ({
-        idx,
-        sku: text(row, c.sku),
-        desc: text(row, c.desc),
-        un: number(row, c.un),
-        cx: number(row, c.cx),
-        date: parseDate(row.c[c.date]),
-        obs: text(row, c.obs),
-        sent: !!(row.c[c.sent] && row.c[c.sent].v === true),
-      }))
-      .filter(r => r.sku || r.desc || r.un !== null || r.cx !== null || r.obs);
+  function parseDate(v) {
+    if (v instanceof Date) return makeDate(v.getUTCFullYear(), v.getUTCMonth() + 1, v.getUTCDate());
+    const t = cellText(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    if (!t) return null;
+    return makeDate(+t[3] < 100 ? 2000 + +t[3] : +t[3], +t[2], +t[1]);
   }
 
-  async function refresh(manual) {
+  const toNumber = v => {
+    if (typeof v === 'number') return v;
+    const t = cellText(v).replace(/\s/g, '');
+    if (!t) return null;
+    if (/^\d{1,3}([.,]\d{3})+$/.test(t)) return Number(t.replace(/[.,]/g, ''));
+    const n = Number(t.replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const fontIsRed = font => !!(font && font.color && font.color.argb && isRed(`#${font.color.argb.slice(2)}`));
+  const cellIsRed = cell => {
+    if (fontIsRed(cell.font)) return true;
+    const v = cell.value;
+    return !!(v && Array.isArray(v.richText) && v.richText.some(t => cellText(t.text) && fontIsRed(t.font)));
+  };
+
+  // A exportação da aba traz tudo: linhas agrupadas, cores e caixas de seleção.
+  async function fetchRows() {
+    await loadScript('exceljs.min.js');
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=xlsx&gid=${GID}&_=${Date.now()}`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+    let buffer;
+    try {
+      const res = await fetch(url, { cache: 'no-store', credentials: 'omit', signal: ctrl.signal });
+      if (!res.ok) throw new Error(`planilha: ${res.status}`);
+      buffer = await res.arrayBuffer();
+    } finally {
+      clearTimeout(timer);
+    }
+    const wb = new window.ExcelJS.Workbook();
+    await wb.xlsx.load(buffer);
+    const ws = wb.worksheets[0];
+
+    let c = null;
+    const rows = [];
+    for (let n = 1; n <= ws.rowCount; n++) {
+      const row = ws.getRow(n);
+      if (!c) {
+        const labels = [];
+        for (let k = 1; k <= ws.columnCount; k++) labels.push({ label: cellText(rawValue(row.getCell(k))) });
+        if (labels.some(l => /^SKU$/i.test(l.label))) c = mapColumns(labels);
+        continue;
+      }
+      const cell = k => row.getCell(c[k] + 1);
+      const sent = rawValue(cell('sent'));
+      const item = {
+        idx: rows.length,
+        sku: cellText(rawValue(cell('sku'))),
+        desc: cellText(rawValue(cell('desc'))),
+        un: toNumber(rawValue(cell('un'))),
+        cx: toNumber(rawValue(cell('cx'))),
+        date: parseDate(rawValue(cell('date'))),
+        obs: cellText(rawValue(cell('obs'))),
+        sent: sent === true || /^(TRUE|VERDADEIRO)$/i.test(cellText(sent)),
+        grouped: !!(row.hidden || row.outlineLevel > 0),
+        red: {},
+      };
+      ['sku', 'desc', 'un', 'cx', 'date', 'obs'].forEach(k => { item.red[k] = cellIsRed(cell(k)); });
+      if (item.sku || item.desc || item.un !== null || item.cx !== null || item.obs) rows.push(item);
+    }
+    if (!c) throw new Error('cabeçalho SKU não encontrado');
+    return rows;
+  }
+
+  async function refresh() {
     if (state.busy) return;
     state.busy = true;
     $('btnRefresh').setAttribute('aria-busy', 'true');
     try {
-      let rows;
-      try {
-        rows = await fetchHtmlRows();
-        state.colorsOk = true;
-      } catch (err) {
-        console.warn(err);
-        rows = await fetchFallbackRows();
-        state.colorsOk = false;
-      }
+      const rows = await fetchRows();
+      const first = !state.loaded;
       state.loaded = true;
       const sig = JSON.stringify(rows);
-      if (sig !== state.lastSig) {
+      if (sig !== state.lastSig || first) {
         if (state.lastSig !== null) markChanges(rows);
         state.rows = rows;
         state.lastSig = sig;
@@ -234,7 +169,10 @@
       }
       setSync(true);
     } catch (err) {
-      setSync(false, err);
+      console.warn(err);
+      state.loaded = true;
+      if (!state.rows.length) render();
+      setSync(false);
     } finally {
       state.busy = false;
       $('btnRefresh').removeAttribute('aria-busy');
@@ -253,9 +191,7 @@
     const time = new Date().toLocaleTimeString('pt-BR');
     $('syncDot').className = ok ? 'on' : 'off';
     if (ok) {
-      $('stSync').textContent = state.colorsOk
-        ? `Planilha lida às ${time}. Atualiza sozinho a cada ${POLL_MS / 1000} segundos.`
-        : `Planilha lida às ${time}, sem atualizar as marcações em vermelho.`;
+      $('stSync').textContent = `Planilha lida às ${time}. Atualiza sozinho a cada ${POLL_MS / 1000} segundos.`;
       $('alert').hidden = true;
       return;
     }
@@ -276,10 +212,12 @@
   const daysUntil = d => Math.round((new Date(d.y, d.m - 1, d.d) - today()) / 86400000);
 
   const inDate = r => !state.date || (r.date ? r.date.iso : '') === state.date;
+  const isHistory = () => state.status === 'historico';
+  const inTab = r => (isHistory() ? r.grouped : !r.grouped);
 
   function visibleRows() {
     const q = state.q.trim().toLocaleLowerCase('pt-BR');
-    let list = state.rows.filter(inDate).filter(r => {
+    let list = state.rows.filter(inTab).filter(inDate).filter(r => {
       if (state.status === 'pendentes' && r.sent) return false;
       if (state.status === 'enviados' && !r.sent) return false;
       return !q || `${r.sku} ${r.desc} ${r.obs}`.toLocaleLowerCase('pt-BR').includes(q);
@@ -295,6 +233,9 @@
         if (typeof x === 'boolean') return (x - y) * state.sortDir;
         return String(x).localeCompare(String(y), 'pt-BR', { numeric: true }) * state.sortDir;
       });
+    } else if (isHistory()) {
+      // Histórico: pedidos mais recentes primeiro.
+      list = [...list].sort((a, b) => (b.date ? b.date.iso : '').localeCompare(a.date ? a.date.iso : ''));
     }
     return list;
   }
@@ -307,10 +248,12 @@
 
   function render() {
     renderDateOptions();
-    const scope = state.rows.filter(inDate);
+    const active = state.rows.filter(r => !r.grouped);
+    const scope = isHistory() ? active : active.filter(inDate);
     renderRoute(scope);
 
     const pending = scope.filter(r => !r.sent).length;
+    $('cntH').textContent = fmt(state.rows.length - active.length);
     $('cntP').textContent = fmt(pending);
     $('cntE').textContent = fmt(scope.length - pending);
     $('cntT').textContent = fmt(scope.length);
@@ -342,7 +285,7 @@
     const cls = [r.sent && 'is-sent', hasRed(r) && 'has-red', state.flash.has(key) && 'flash']
       .filter(Boolean).join(' ');
     let dateHtml = r.date ? r.date.label : '<span class="missing">Sem data</span>';
-    if (r.date && !r.sent) {
+    if (r.date && !r.sent && !r.grouped) {
       const days = daysUntil(r.date);
       if (days < 0) dateHtml += `<small>${plural(-days, 'dia', 'dias')} de atraso</small>`;
     }
@@ -364,6 +307,8 @@
     if (list.length) return;
     if (!state.loaded) {
       box.innerHTML = '<strong>Lendo a planilha…</strong>Os itens aparecem aqui em instantes.';
+    } else if (!state.q && isHistory() && !state.rows.some(r => r.grouped)) {
+      box.innerHTML = '<strong>Nenhum pedido no histórico</strong>Agrupe as linhas de um pedido antigo na planilha e ele aparece aqui.';
     } else if (!state.rows.length) {
       box.innerHTML = '<strong>Nenhum item na lista</strong>Preencha a aba PEDIDO DF na planilha e os itens aparecem aqui.';
     } else if (state.q) {
@@ -377,9 +322,9 @@
 
   function renderDateOptions() {
     const dates = new Map();
-    state.rows.forEach(r => { if (r.date) dates.set(r.date.iso, r.date.label); });
+    state.rows.filter(inTab).forEach(r => { if (r.date) dates.set(r.date.iso, r.date.label); });
     if (state.date && !dates.has(state.date)) state.date = '';
-    const opts = [...dates.keys()].sort()
+    const opts = [...dates.keys()].sort().reverse()
       .map(iso => `<option value="${iso}">${dates.get(iso)}</option>`).join('');
     $('fDate').innerHTML = `<option value="">Todas</option>${opts}`;
     $('fDate').value = state.date;
@@ -437,7 +382,7 @@
     const dates = [...new Set(list.map(r => (r.date ? r.date.label : null)).filter(Boolean))];
     const isos = [...new Set(list.map(r => (r.date ? r.date.iso : null)).filter(Boolean))].sort();
     const now = new Date();
-    const statusLabel = { pendentes: 'Pendentes', enviados: 'Enviados', todos: 'Todos os itens' }[state.status];
+    const statusLabel = { pendentes: 'Pendentes', enviados: 'Enviados', todos: 'Todos os itens', historico: 'Histórico' }[state.status];
     const stamp = isos.length === 1 ? isos[0] : now.toISOString().slice(0, 10);
     return {
       dates,
@@ -463,7 +408,7 @@
     const M = 14;
     const INK = [20, 39, 58], STEEL = [79, 101, 120], SOL = [245, 163, 0], LINE = [211, 220, 227];
     const showDate = meta.dates.length > 1 || list.some(r => !r.date);
-    const showStatus = state.status === 'todos';
+    const showStatus = state.status === 'todos' || isHistory();
 
     const pageHeader = () => {
       doc.setFillColor(...INK); doc.rect(0, 0, W, 20, 'F');
@@ -786,7 +731,7 @@
   /* ---------- Eventos ---------- */
 
   $('lnkSheet').href = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit?gid=${GID}#gid=${GID}`;
-  $('btnRefresh').addEventListener('click', () => refresh(true));
+  $('btnRefresh').addEventListener('click', () => refresh());
   $('btnPdf').addEventListener('click', e => runExport(e.currentTarget, 'Gerar PDF', () => openPreview('pdf')));
   $('btnXlsx').addEventListener('click', e => runExport(e.currentTarget, 'Gerar Excel', () => openPreview('xlsx')));
   $('pvCancel').addEventListener('click', () => $('preview').close());
